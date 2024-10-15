@@ -11,9 +11,6 @@ import torch.nn.functional as F
 from tqdm import tqdm_notebook
 import multiprocessing
 
-from ot.backend import get_backend
-from ot.optim import cg
-
 from PIL import Image
 from .inception import InceptionV3
 from tqdm import tqdm_notebook as tqdm
@@ -183,58 +180,3 @@ def get_Z_pushed_loader_stats(T, loader, ZC=1, Z_STD=0.1, batch_size=8, n_epochs
     mu, sigma = np.mean(pred_arr, axis=0), np.cov(pred_arr, rowvar=False)
     gc.collect(); torch.cuda.empty_cache()
     return mu, sigma
-
-def kernel_weak_optimal_transport(Xa, Xb, a=None, b=None, gamma=1., verbose=False, log=False, G0=None, **kwargs):
-    # Custom implementation based on ot.weak source code from pot
-    # gamma - coefficient of the kernel variance
-    nx = get_backend(Xa, Xb)
-
-    Xa2 = nx.to_numpy(Xa)
-    Xb2 = nx.to_numpy(Xb)
-
-    if a is None:
-        a2 = np.ones((Xa.shape[0])) / Xa.shape[0]
-    else:
-        a2 = nx.to_numpy(a)
-    if b is None:
-        b2 = np.ones((Xb.shape[0])) / Xb.shape[0]
-    else:
-        b2 = nx.to_numpy(b)
-
-    # init uniform
-    if G0 is None:
-        T0 = a2[:, None] * b2[None, :]
-    else:
-        T0 = nx.to_numpy(G0)
-
-    # weak OT loss with torch (CPU)
-    def f_torch(T):
-        T_t = torch.tensor(T, dtype=torch.float32, requires_grad=True)
-        Xa2_t, Xb2_t = torch.tensor(Xa2, dtype=torch.float32), torch.tensor(Xb2, dtype=torch.float32)
-
-        cost_t = (torch.cdist(Xa2_t, Xb2_t) * T_t).sum()
-        T2_t = (T_t.T / T_t.sum(axis=1)).T
-        T3_t = torch.matmul(T2_t.reshape(T2_t.shape[0], T2_t.shape[1], 1), T2_t.reshape(T2_t.shape[0], 1, T2_t.shape[1]))
-        T4_t = (T3_t * T_t.sum(axis=1).reshape(-1, 1, 1)).sum(axis=0)
-
-        cvar_t = (torch.cdist(Xb2_t, Xb2_t) * T4_t).sum()
-        f_t = cost_t - (gamma / 2) * cvar_t
-        f_t.backward()
-        return T_t.grad.cpu().detach().numpy(), f_t.item()
-    
-    # kernel weak OT cost
-    def f(T):
-        return f_torch(T)[1]
-
-    # kernel weak OT gradient
-    def df(T):
-        return f_torch(T)[0]
-
-    # solve with conditional gradient and return solution
-    if log:
-        res, log = cg(a2, b2, 0, 1, f, df, T0, log=log, verbose=verbose, **kwargs)
-        log['u'] = nx.from_numpy(log['u'], type_as=Xa)
-        log['v'] = nx.from_numpy(log['v'], type_as=Xb)
-        return nx.from_numpy(res, type_as=Xa), log
-    else:
-        return nx.from_numpy(cg(a2, b2, 0, 1, f, df, T0, log=log, verbose=verbose, **kwargs), type_as=Xa)

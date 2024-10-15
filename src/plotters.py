@@ -2,11 +2,9 @@ import matplotlib
 import numpy as np
 import matplotlib.pyplot as plt
 from .tools import ewma, freeze
-from .tools import kernel_weak_optimal_transport
 
 import torch
 import gc
-import seaborn as sns
 
 def plot_Z_images(XZ, Y, T):
     freeze(T);
@@ -39,60 +37,21 @@ def plot_random_Z_images(X_sampler, ZC, Z_STD, Y_sampler, T):
     Y = Y_sampler.sample(10)
     return plot_Z_images(XZ, Y, T)
 
-def plot_bar_and_stochastic_2D(X_sampler, Y_sampler, T, ZD, Z_STD, plot_discrete=False, gamma=1.):
+def plot_bar_and_stochastic_2D(X_sampler, Y_sampler, T, ZD, Z_STD):
     DIM = 2
-    from matplotlib import collections as mc
     freeze(T)
     
-    DISCRETE_OT = 256
     PLOT_X_SIZE_LEFT = 64
     PLOT_Z_COMPUTE_LEFT = 256
+
     PLOT_X_SIZE_RIGHT = 32
     PLOT_Z_SIZE_RIGHT = 4
 
     assert PLOT_Z_COMPUTE_LEFT >= PLOT_Z_SIZE_RIGHT
     assert PLOT_X_SIZE_LEFT >= PLOT_X_SIZE_RIGHT
-    assert DISCRETE_OT >= PLOT_X_SIZE_LEFT
-    
-    fig, axes = plt.subplots(1, 3, figsize=(9, 3), dpi=150, sharex=True, sharey=True, )
-    for i in range(2):
-        axes[i].set_xlim(-2.5, 2.5); axes[i].set_ylim(-2.5, 2.5)
-        axes[i].grid(True)
 
-#     axes[0].set_title(r'Map $x\mapsto \overline{T}(x)=\int_{\mathcal{Z}}T(x,z)d\mathbb{S}(z)$', fontsize=22, pad=10)
-#     axes[1].set_title(r'Stochastic map $x\mapsto T(x,z)$', fontsize=20, pad=10)
-#     axes[2].set_title(r'Stochastic map $x\mapsto T(x,z)$', fontsize=20, pad=10)
-
-    # Computing and plotting discrete OT bar map
-    X, Y = X_sampler.sample(DISCRETE_OT), Y_sampler.sample(DISCRETE_OT)
-    
-    if plot_discrete:
-        X_np, Y_np = X.cpu().numpy(), Y.cpu().numpy()
-        pi = kernel_weak_optimal_transport(X_np, Y_np, gamma=gamma)
-        T_X_bar_np = pi @ Y_np * len(X_np)
-        
-        idx, lines = [], []
-        for i in range(PLOT_X_SIZE_RIGHT):
-            idx.append(np.random.choice(list(range(len(Y))), size=PLOT_Z_SIZE_RIGHT, p=pi[i]/pi[i].sum()))
-            for j in range(PLOT_Z_SIZE_RIGHT):
-                lines.append((X_np[i], Y_np[idx[-1][j]]))
-        lc = mc.LineCollection(lines, linewidths=0.5, color='black')
-        axes[2].add_collection(lc)
-        axes[2].scatter(
-            X_np[:PLOT_X_SIZE_RIGHT, 0], X_np[:PLOT_X_SIZE_RIGHT, 1], c='darkseagreen', edgecolors='black',
-            zorder=2,  label=r'$x\sim\mathbb{P}$'
-        )
-        idx = np.concatenate(idx)
-        axes[2].scatter(
-            Y_np[idx, 0], Y_np[idx, 1],
-            c='wheat', edgecolors='black', zorder=3,  label=r'$T(x,z)$'
-        )
-        axes[2].legend(fontsize=16, loc='lower right', framealpha=1)
-        
-    # Our method results
-    with torch.no_grad():
-        X = X[:PLOT_X_SIZE_LEFT].reshape(-1, 1, DIM).repeat(1, PLOT_Z_COMPUTE_LEFT, 1)
-        Y = Y[:PLOT_X_SIZE_LEFT]
+    X = X_sampler.sample(PLOT_X_SIZE_LEFT).reshape(-1, 1, DIM).repeat(1, PLOT_Z_COMPUTE_LEFT, 1)
+    Y = Y_sampler.sample(PLOT_X_SIZE_LEFT)
 
     with torch.no_grad():
         Z = torch.randn(PLOT_X_SIZE_LEFT, PLOT_Z_COMPUTE_LEFT, ZD, device='cuda') * Z_STD
@@ -106,8 +65,17 @@ def plot_bar_and_stochastic_2D(X_sampler, Y_sampler, T, ZD, Z_STD, plot_discrete
     Y_np = Y.cpu().numpy()
     T_XZ_np = T_XZ.cpu().numpy()
 
-    
+    fig, axes = plt.subplots(1, 3, figsize=(9, 3), dpi=150, sharex=True, sharey=True, )
+    for i in range(2):
+        axes[i].set_xlim(-2.5, 2.5); axes[i].set_ylim(-2.5, 2.5)
+        axes[i].grid(True)
+
+#     axes[0].set_title(r'Map $x\mapsto \overline{T}(x)=\int_{\mathcal{Z}}T(x,z)d\mathbb{S}(z)$', fontsize=22, pad=10)
+#     axes[1].set_title(r'Stochastic map $x\mapsto T(x,z)$', fontsize=20, pad=10)
+
+    from matplotlib import collections  as mc
     lines = list(zip(X_np[:PLOT_X_SIZE_LEFT], T_XZ_np.mean(axis=1)[:PLOT_X_SIZE_LEFT]))
+
     lc = mc.LineCollection(lines, linewidths=1, color='black')
     axes[0].add_collection(lc)
 
@@ -178,95 +146,4 @@ def plot_generated_2D(X_sampler, Y_sampler, T, ZD, Z_STD):
 #     axes[2].set_title(r'Fitted $T(x,z)_{\#}(\mathbb{P}\times\mathbb{S})$', fontsize=22, pad=10)
 
     fig.tight_layout()
-    return fig, axes
-
-def plot_1D(X_sampler, Y_sampler, T, ZD, Z_STD, num_samples=1024, plot_discrete=False, gamma=1.):
-    DIM = 1; freeze(T)
-    
-    X, Y = X_sampler.sample(num_samples), Y_sampler.sample(num_samples)
-    X_np, Y_np = X.cpu().numpy(), Y.cpu().numpy()
-    
-    fig, axes = plt.subplots(1, 4, figsize=(12, 3), dpi=150)
-    for i in range(2,4):
-        axes[i].set_xlim(-2.5, 2.5); axes[i].set_ylim(-2.5, 2.5)
-        axes[i].set_axisbelow(True)
-        axes[i].grid(True)
-    
-    axes[0].set_axisbelow(True); axes[0].grid(axis='x')
-    axes[1].set_axisbelow(True); axes[1].grid(axis='y')
-    axes[0].set_xlim(-2.5, 2.5); axes[0].set_ylim(0, 0.7)
-    axes[1].set_ylim(-2.5, 2.5); axes[1].set_xlim(0, 0.7)
-    
-    # Plotting X
-    sns.kdeplot(
-        X_np[:, 0], color='lightcoral', shade=True,
-        edgecolor='black', alpha=0.95,
-        ax=axes[0], label=r'$x\sim\mathbb{P}$'
-    )  
-    axes[0].legend(fontsize=12, loc='upper right', framealpha=1)
-#     axes[0].set_xlabel(r"$x$", fontsize=12)
-    axes[0].set_title(r"Input $\mathbb{P}$ (1D)", fontsize=14)
-    
-    # Plotting Y
-    sns.kdeplot(
-        y=Y_np[:, 0], color='darkseagreen', shade=True,
-        edgecolor='black', alpha=0.95,
-        ax=axes[1], label=r'$y\sim\mathbb{Q}$'
-    )
-    axes[1].legend(fontsize=12, loc='upper right', framealpha=1)   
-#     axes[1].set_ylabel(r"$y$", fontsize=12)
-    axes[1].set_title(r"Target $\mathbb{Q}$ (1D)", fontsize=14)
-    
-        
-    # Computing and plotting discrete OT bar map
-    if plot_discrete:
-        pi = kernel_weak_optimal_transport(X_np, Y_np, gamma=gamma)
-        T_X_bar_np = pi @ Y_np * len(X_np)
-
-        idx, XY = [], []
-        for i in range(num_samples):
-            idx.append(np.random.choice(list(range(len(Y))), p=pi[i]/pi[i].sum()))
-            XY.append((X_np[i][0], Y_np[idx[-1]][0]))
-        XY = np.array(XY)
-        sns.kdeplot(
-            XY[:, 0], XY[:, 1], xlim=(-2.5, 2.5), ylim=(-2.5, 2.5),
-            color='black', alpha=1., ax=axes[3], label=r'$(x,y)\sim\pi^{*}$'
-        ) 
-        sns.kdeplot(
-            XY[:, 0], XY[:, 1], xlim=(-2.5, 2.5), ylim=(-2.5, 2.5),
-            color='skyblue', alpha=1., ax=axes[3], shade=True
-        ) 
-        axes[3].legend(fontsize=12, loc='upper right', framealpha=1)
-#         axes[3].set_xlabel(r"$x$", fontsize=12)
-#         axes[3].set_ylabel(r"$y$", fontsize=12)
-        axes[3].set_title(r"DOT plan $\pi^{*}$ (2D)", fontsize=14)
-    
-    # Computing and plotting discrete OT bar map
-    with torch.no_grad():
-        X = X.reshape(-1, 1, DIM).repeat(1, 1, 1)
-        Z = torch.randn(X.size(0), 1, ZD, device='cuda') * Z_STD
-        XZ = torch.cat([X, Z], dim=2)
-        T_XZ = T(
-            XZ.flatten(start_dim=0, end_dim=1)
-        )
-    
-    X_np = X[:, 0].cpu().numpy()
-    T_XZ_np = T_XZ.cpu().numpy()
-    
-    sns.kdeplot(
-        X_np[:, 0], T_XZ_np[:, 0], xlim=(-2.5, 2.5), ylim=(-2.5, 2.5),
-        color='black', alpha=1., ax=axes[2],
-        label=r'$(x,\hat{T}_{x}(z))\sim \hat{\pi}$'
-    )
-    sns.kdeplot(
-        X_np[:, 0], T_XZ_np[:, 0], xlim=(-2.5, 2.5), ylim=(-2.5, 2.5),
-        color='wheat', alpha=1., ax=axes[2], shade=True
-    )
-    axes[2].legend(fontsize=12, loc='upper right', framealpha=1)
-#     axes[2].set_xlabel(r"$x$", fontsize=12)
-#     axes[2].set_ylabel(r"$y=\hat{T}_{x}(z)$", fontsize=12)
-    axes[2].set_title(r"Learned $\hat{\pi}$ (2D), ours", fontsize=14)
-
-    fig.tight_layout(pad=0.01)
-    
     return fig, axes

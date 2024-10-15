@@ -55,71 +55,6 @@ class StandardNormalSampler(Sampler):
     def sample(self, batch_size=10):
         return torch.randn(batch_size, self.dim, device=self.device)
     
-class CubeUniformSampler(Sampler):
-    def __init__(
-        self, dim=1, centered=False, normalized=False, device='cuda'
-    ):
-        super(CubeUniformSampler, self).__init__(device=device)
-        self.dim = dim
-        self.centered = centered
-        self.normalized = normalized
-        self.var = self.dim if self.normalized else (self.dim / 12)
-        self.cov = np.eye(self.dim, dtype=np.float32) if self.normalized else np.eye(self.dim, dtype=np.float32) / 12
-        self.mean = np.zeros(self.dim, dtype=np.float32) if self.centered else .5 * np.ones(self.dim, dtype=np.float32)
-
-        self.bias = torch.tensor(self.mean, device=self.device)
-
-    def sample(self, size=10):
-        with torch.no_grad():
-            sample = np.sqrt(self.var) * (torch.rand(
-                size, self.dim, device=self.device
-            ) - .5) / np.sqrt(self.dim / 12)  + self.bias
-        return sample
-    
-class MixN2GaussiansSampler(Sampler):
-    def __init__(self, n=5, dim=2, std=1, step=9, device='cuda'):
-        super(MixN2GaussiansSampler, self).__init__(device=device)
-        
-        assert dim == 2
-        self.dim = 2
-        self.std, self.step = std, step
-        
-        self.n = n
-        
-        grid_1d = np.linspace(-(n-1) / 2., (n-1) / 2., n)
-        xx, yy = np.meshgrid(grid_1d, grid_1d)
-        centers = np.stack([xx, yy]).reshape(2, -1).T
-        self.centers = torch.tensor(centers, device=self.device,)
-        
-    def sample(self, batch_size=10):
-        batch = torch.randn(batch_size, self.dim, device=self.device)
-        indices = random.choices(range(len(self.centers)), k=batch_size)
-        with torch.no_grad():
-            batch *= self.std
-            batch += self.step * self.centers[indices, :]
-        return batch 
-
-class MixNGaussiansSampler(Sampler):
-    def __init__(self, n=5, dim=2, std=1, step=9, device='cuda'):
-        super(MixNGaussiansSampler, self).__init__(device=device)
-        
-        assert dim == 1
-        self.dim = 1
-        self.std, self.step = std, step
-        
-        self.n = n
-        
-        grid_1d = np.linspace(-(n-1) / 2., (n-1) / 2., n)
-        self.centers = torch.tensor(grid_1d, device=self.device,)
-        
-    def sample(self, batch_size=10):
-        batch = torch.randn(batch_size, self.dim, device=self.device)
-        indices = random.choices(range(len(self.centers)), k=batch_size)
-        with torch.no_grad():
-            batch *= self.std
-            batch += self.step * self.centers[indices, None]
-        return batch
-    
     
 class Mix8GaussiansSampler(Sampler):
     def __init__(self, with_central=False, std=1, r=12, dim=2, device='cuda'):
@@ -147,19 +82,6 @@ class Mix8GaussiansSampler(Sampler):
             batch *= self.std
             batch += self.r * self.centers[indices, :]
         return batch
-    
-class SphereUniformSampler(Sampler):
-    def __init__(self, dim=1, device='cuda'):
-        super(SphereUniformSampler, self).__init__(device=device)
-        self.dim = dim
-        
-    def sample(self, batch_size=10):
-        batch = torch.randn(
-            batch_size, self.dim,
-            device=self.device
-        )
-        batch /= torch.norm(batch, dim=1)[:, None]
-        return torch.tensor(batch, device=self.device)
 
 class Transformer(object):
     def __init__(self, device='cuda'):
@@ -172,7 +94,8 @@ class StandardNormalScaler(Transformer):
         self.base_sampler = base_sampler
         batch = self.base_sampler.sample(batch_size).cpu().detach().numpy()
         
-        mean, cov = np.mean(batch, axis=0), np.matrix(np.cov(batch.T))
+        mean, cov = np.mean(batch, axis=0), np.cov(batch.T)
+        
         self.mean = torch.tensor(
             mean, device=self.device, dtype=torch.float32
         )
@@ -217,19 +140,4 @@ class LinearTransformer(Transformer):
             batch = batch @ self.weight.T
             if self.bias is not None:
                 batch += self.bias
-        return batch
-    
-class NormalNoiseTransformer(Transformer):
-    def __init__(
-        self, base_sampler, std=0.01,
-        device='cuda'
-    ):
-        super(NormalNoiseTransformer, self).__init__(device=device)
-        self.base_sampler = base_sampler
-        self.std = std
-        
-    def sample(self, batch_size=4):
-        batch = self.base_sampler.sample(batch_size)
-        with torch.no_grad():
-            batch = batch + self.std * torch.randn_like(batch)
         return batch
