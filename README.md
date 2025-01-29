@@ -1,74 +1,248 @@
-# Kernel Neural Optimal Transport (NOT)
-This is the official `Python` implementation of the [ICLR 2023](https://iclr.cc) paper **Kernel Neural Optimal Transport** (paper on [openreview](https://openreview.net/forum?id=Zuc_MHtUma4)) by [Alexander Korotin](https://scholar.google.ru/citations?user=1rIIvjAAAAAJ&hl=en), [Daniil Selikhanovych](https://scholar.google.com/citations?user=ZpZhN3QAAAAJ&hl=en) and [Evgeny Burnaev](https://scholar.google.ru/citations?user=pCRdcOwAAAAJ&hl=ru).
 
-The repository contains reproducible `PyTorch` source code for computing **optimal transport** (OT) **plans** for the *weak kernel* costs in high dimensions with neural networks. Examples are provided for toy problems (1D, 2D) and for the unpaired image-to-image translation task for various pairs of datasets. The implementation of the latter contains *distance-based*, *laplacian*, *exponential* and *bilinear* kernels.
+<img src='imgs/horse2zebra.gif' align="right" width=384>
 
-<p align="center"><img src="pics/stochastic_OT_map_v2.png" width="400" /></p>
+<br><br><br>
 
-## Presentations
-- [Short Talk](https://iclr.cc/virtual/2023/poster/11992) by Daniil Selikhanovych at [ICLR 2023](https://iclr.cc/Conferences/2023) (May 2023, EN)
+# CycleGAN and pix2pix in PyTorch
 
-## Seminars and Materials
-- Seminar and solutions on NOT with **weak** costs (TO DO);
-- Vector \*.svg [sources](https://github.com/iamalexkorotin/KernelNeuralOptimalTransport/blob/main/pics/KNOT_figures.svg) of the figures in the paper (use [inkscape](https://inkscape.org/) to edit);
+**New**:  Please check out [img2img-turbo](https://github.com/GaParmar/img2img-turbo) repo that includes both pix2pix-turbo and CycleGAN-Turbo. Our new one-step image-to-image translation methods can support both paired and unpaired training and produce better results by leveraging the pre-trained StableDiffusion-Turbo model. The inference time for 512x512 image is 0.29 sec on A6000 and 0.11 sec on A100.
 
-## Related repositories
-- [Repository](https://github.com/iamalexkorotin/NeuralOptimalTransport) for [Neural Optimal Transport](https://arxiv.org/abs/2201.12220) paper (ICLR 2023).
-- [Repository](https://github.com/justkolesov/Wasserstein1Benchmark) for [Kantorovich Strikes Back! Wasserstein GANs are not Optimal Transport?](https://arxiv.org/abs/2206.07767) paper (NeurIPS 2022).
-- [Repository](https://github.com/iamalexkorotin/Wasserstein2Benchmark) for [Do Neural Optimal Transport Solvers Work? A Continuous Wasserstein-2 Benchmark](https://arxiv.org/abs/2106.01954) paper (NeurIPS 2021).
+Please check out [contrastive-unpaired-translation](https://github.com/taesungp/contrastive-unpaired-translation) (CUT), our new unpaired image-to-image translation model that enables fast and memory-efficient training.
+
+We provide PyTorch implementations for both unpaired and paired image-to-image translation.
+
+The code was written by [Jun-Yan Zhu](https://github.com/junyanz) and [Taesung Park](https://github.com/taesungp), and supported by [Tongzhou Wang](https://github.com/SsnL).
+
+This PyTorch implementation produces results comparable to or better than our original Torch software. If you would like to reproduce the same results as in the papers, check out the original [CycleGAN Torch](https://github.com/junyanz/CycleGAN) and [pix2pix Torch](https://github.com/phillipi/pix2pix) code in Lua/Torch.
+
+**Note**: The current software works well with PyTorch 1.4. Check out the older [branch](https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/tree/pytorch0.3.1) that supports PyTorch 0.1-0.3.
+
+You may find useful information in [training/test tips](docs/tips.md) and [frequently asked questions](docs/qa.md). To implement custom models and datasets, check out our [templates](#custom-model-and-dataset). To help users better understand and adapt our codebase, we provide an [overview](docs/overview.md) of the code structure of this repository.
+
+**CycleGAN: [Project](https://junyanz.github.io/CycleGAN/) |  [Paper](https://arxiv.org/pdf/1703.10593.pdf) |  [Torch](https://github.com/junyanz/CycleGAN) |
+[Tensorflow Core Tutorial](https://www.tensorflow.org/tutorials/generative/cyclegan) | [PyTorch Colab](https://colab.research.google.com/github/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/CycleGAN.ipynb)**
+
+<img src="https://junyanz.github.io/CycleGAN/images/teaser_high_res.jpg" width="800"/>
+
+**Pix2pix:  [Project](https://phillipi.github.io/pix2pix/) |  [Paper](https://arxiv.org/pdf/1611.07004.pdf) |  [Torch](https://github.com/phillipi/pix2pix) |
+[Tensorflow Core Tutorial](https://www.tensorflow.org/tutorials/generative/pix2pix) | [PyTorch Colab](https://colab.research.google.com/github/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/pix2pix.ipynb)**
+
+<img src="https://phillipi.github.io/pix2pix/images/teaser_v3.png" width="800px"/>
+
+
+**[EdgesCats Demo](https://affinelayer.com/pixsrv/) | [pix2pix-tensorflow](https://github.com/affinelayer/pix2pix-tensorflow) | by [Christopher Hesse](https://twitter.com/christophrhesse)**
+
+<img src='imgs/edges2cats.jpg' width="400px"/>
+
+If you use this code for your research, please cite:
+
+Unpaired Image-to-Image Translation using Cycle-Consistent Adversarial Networks.<br>
+[Jun-Yan Zhu](https://www.cs.cmu.edu/~junyanz/)\*,  [Taesung Park](https://taesung.me/)\*, [Phillip Isola](https://people.eecs.berkeley.edu/~isola/), [Alexei A. Efros](https://people.eecs.berkeley.edu/~efros). In ICCV 2017. (* equal contributions) [[Bibtex]](https://junyanz.github.io/CycleGAN/CycleGAN.txt)
+
+
+Image-to-Image Translation with Conditional Adversarial Networks.<br>
+[Phillip Isola](https://people.eecs.berkeley.edu/~isola), [Jun-Yan Zhu](https://www.cs.cmu.edu/~junyanz/), [Tinghui Zhou](https://people.eecs.berkeley.edu/~tinghuiz), [Alexei A. Efros](https://people.eecs.berkeley.edu/~efros). In CVPR 2017. [[Bibtex]](https://www.cs.cmu.edu/~junyanz/projects/pix2pix/pix2pix.bib)
+
+## Talks and Course
+pix2pix slides: [keynote](http://efrosgans.eecs.berkeley.edu/CVPR18_slides/pix2pix.key) | [pdf](http://efrosgans.eecs.berkeley.edu/CVPR18_slides/pix2pix.pdf),
+CycleGAN slides: [pptx](http://efrosgans.eecs.berkeley.edu/CVPR18_slides/CycleGAN.pptx) | [pdf](http://efrosgans.eecs.berkeley.edu/CVPR18_slides/CycleGAN.pdf)
+
+CycleGAN course assignment [code](http://www.cs.toronto.edu/~rgrosse/courses/csc321_2018/assignments/a4-code.zip) and [handout](http://www.cs.toronto.edu/~rgrosse/courses/csc321_2018/assignments/a4-handout.pdf) designed by Prof. [Roger Grosse](http://www.cs.toronto.edu/~rgrosse/) for [CSC321](http://www.cs.toronto.edu/~rgrosse/courses/csc321_2018/) "Intro to Neural Networks and Machine Learning" at University of Toronto. Please contact the instructor if you would like to adopt it in your course.
+
+## Colab Notebook
+TensorFlow Core CycleGAN Tutorial: [Google Colab](https://colab.research.google.com/github/tensorflow/docs/blob/master/site/en/tutorials/generative/cyclegan.ipynb) | [Code](https://github.com/tensorflow/docs/blob/master/site/en/tutorials/generative/cyclegan.ipynb)
+
+TensorFlow Core pix2pix Tutorial: [Google Colab](https://colab.research.google.com/github/tensorflow/docs/blob/master/site/en/tutorials/generative/pix2pix.ipynb) | [Code](https://github.com/tensorflow/docs/blob/master/site/en/tutorials/generative/pix2pix.ipynb)
+
+PyTorch Colab notebook: [CycleGAN](https://colab.research.google.com/github/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/CycleGAN.ipynb) and [pix2pix](https://colab.research.google.com/github/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/pix2pix.ipynb)
+
+ZeroCostDL4Mic Colab notebook: [CycleGAN](https://colab.research.google.com/github/HenriquesLab/ZeroCostDL4Mic/blob/master/Colab_notebooks_Beta/CycleGAN_ZeroCostDL4Mic.ipynb) and [pix2pix](https://colab.research.google.com/github/HenriquesLab/ZeroCostDL4Mic/blob/master/Colab_notebooks_Beta/pix2pix_ZeroCostDL4Mic.ipynb)
+
+## Other implementations
+### CycleGAN
+<p><a href="https://github.com/leehomyc/cyclegan-1"> [Tensorflow]</a> (by Harry Yang),
+<a href="https://github.com/architrathore/CycleGAN/">[Tensorflow]</a> (by Archit Rathore),
+<a href="https://github.com/vanhuyz/CycleGAN-TensorFlow">[Tensorflow]</a> (by Van Huy),
+<a href="https://github.com/XHUJOY/CycleGAN-tensorflow">[Tensorflow]</a> (by Xiaowei Hu),
+<a href="https://github.com/LynnHo/CycleGAN-Tensorflow-2"> [Tensorflow2]</a> (by Zhenliang He),
+<a href="https://github.com/luoxier/CycleGAN_Tensorlayer"> [TensorLayer1.0]</a> (by luoxier),
+<a href="https://github.com/tensorlayer/cyclegan"> [TensorLayer2.0]</a> (by zsdonghao),
+<a href="https://github.com/Aixile/chainer-cyclegan">[Chainer]</a> (by Yanghua Jin),
+<a href="https://github.com/yunjey/mnist-svhn-transfer">[Minimal PyTorch]</a> (by yunjey),
+<a href="https://github.com/Ldpe2G/DeepLearningForFun/tree/master/Mxnet-Scala/CycleGAN">[Mxnet]</a> (by Ldpe2G),
+<a href="https://github.com/tjwei/GANotebooks">[lasagne/Keras]</a> (by tjwei),
+<a href="https://github.com/simontomaskarlsson/CycleGAN-Keras">[Keras]</a> (by Simon Karlsson),
+<a href="https://github.com/Ldpe2G/DeepLearningForFun/tree/master/Oneflow-Python/CycleGAN">[OneFlow]</a> (by Ldpe2G)
+</p>
+</ul>
+
+### pix2pix
+<p><a href="https://github.com/affinelayer/pix2pix-tensorflow"> [Tensorflow]</a> (by Christopher Hesse),
+<a href="https://github.com/Eyyub/tensorflow-pix2pix">[Tensorflow]</a> (by Eyyüb Sariu),
+<a href="https://github.com/datitran/face2face-demo"> [Tensorflow (face2face)]</a> (by Dat Tran),
+<a href="https://github.com/awjuliani/Pix2Pix-Film"> [Tensorflow (film)]</a> (by Arthur Juliani),
+<a href="https://github.com/kaonashi-tyc/zi2zi">[Tensorflow (zi2zi)]</a> (by Yuchen Tian),
+<a href="https://github.com/pfnet-research/chainer-pix2pix">[Chainer]</a> (by mattya),
+<a href="https://github.com/tjwei/GANotebooks">[tf/torch/keras/lasagne]</a> (by tjwei),
+<a href="https://github.com/taey16/pix2pixBEGAN.pytorch">[Pytorch]</a> (by taey16)
+</p>
+</ul>
+
+## Prerequisites
+- Linux or macOS
+- Python 3
+- CPU or NVIDIA GPU + CUDA CuDNN
+
+## Getting Started
+### Installation
+
+- Clone this repo:
+```bash
+git clone https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix
+cd pytorch-CycleGAN-and-pix2pix
+```
+
+- Install [PyTorch](http://pytorch.org) and 0.4+ and other dependencies (e.g., torchvision, [visdom](https://github.com/facebookresearch/visdom) and [dominate](https://github.com/Knio/dominate)).
+  - For pip users, please type the command `pip install -r requirements.txt`.
+  - For Conda users, you can create a new Conda environment using `conda env create -f environment.yml`.
+  - For Docker users, we provide the pre-built Docker image and Dockerfile. Please refer to our [Docker](docs/docker.md) page.
+  - For Repl users, please click [![Run on Repl.it](https://repl.it/badge/github/junyanz/pytorch-CycleGAN-and-pix2pix)](https://repl.it/github/junyanz/pytorch-CycleGAN-and-pix2pix).
+
+### CycleGAN train/test
+- Download a CycleGAN dataset (e.g. maps):
+```bash
+bash ./datasets/download_cyclegan_dataset.sh maps
+```
+- To view training results and loss plots, run `python -m visdom.server` and click the URL http://localhost:8097.
+- To log training progress and test images to W&B dashboard, set the `--use_wandb` flag with train and test script
+- Train a model:
+```bash
+#!./scripts/train_cyclegan.sh
+python train.py --dataroot ./datasets/maps --name maps_cyclegan --model cycle_gan
+```
+To see more intermediate results, check out `./checkpoints/maps_cyclegan/web/index.html`.
+- Test the model:
+```bash
+#!./scripts/test_cyclegan.sh
+python test.py --dataroot ./datasets/maps --name maps_cyclegan --model cycle_gan
+```
+- The test results will be saved to a html file here: `./results/maps_cyclegan/latest_test/index.html`.
+
+### pix2pix train/test
+- Download a pix2pix dataset (e.g.[facades](http://cmp.felk.cvut.cz/~tylecr1/facade/)):
+```bash
+bash ./datasets/download_pix2pix_dataset.sh facades
+```
+- To view training results and loss plots, run `python -m visdom.server` and click the URL http://localhost:8097.
+- To log training progress and test images to W&B dashboard, set the `--use_wandb` flag with train and test script
+- Train a model:
+```bash
+#!./scripts/train_pix2pix.sh
+python train.py --dataroot ./datasets/facades --name facades_pix2pix --model pix2pix --direction BtoA
+```
+To see more intermediate results, check out  `./checkpoints/facades_pix2pix/web/index.html`.
+
+- Test the model (`bash ./scripts/test_pix2pix.sh`):
+```bash
+#!./scripts/test_pix2pix.sh
+python test.py --dataroot ./datasets/facades --name facades_pix2pix --model pix2pix --direction BtoA
+```
+- The test results will be saved to a html file here: `./results/facades_pix2pix/test_latest/index.html`. You can find more scripts at `scripts` directory.
+- To train and test pix2pix-based colorization models, please add `--model colorization` and `--dataset_mode colorization`. See our training [tips](https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/docs/tips.md#notes-on-colorization) for more details.
+
+### Apply a pre-trained model (CycleGAN)
+- You can download a pretrained model (e.g. horse2zebra) with the following script:
+```bash
+bash ./scripts/download_cyclegan_model.sh horse2zebra
+```
+- The pretrained model is saved at `./checkpoints/{name}_pretrained/latest_net_G.pth`. Check [here](https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/scripts/download_cyclegan_model.sh#L3) for all the available CycleGAN models.
+- To test the model, you also need to download the  horse2zebra dataset:
+```bash
+bash ./datasets/download_cyclegan_dataset.sh horse2zebra
+```
+
+- Then generate the results using
+```bash
+python test.py --dataroot datasets/horse2zebra/testA --name horse2zebra_pretrained --model test --no_dropout
+```
+- The option `--model test` is used for generating results of CycleGAN only for one side. This option will automatically set `--dataset_mode single`, which only loads the images from one set. On the contrary, using `--model cycle_gan` requires loading and generating results in both directions, which is sometimes unnecessary. The results will be saved at `./results/`. Use `--results_dir {directory_path_to_save_result}` to specify the results directory.
+
+- For pix2pix and your own models, you need to explicitly specify `--netG`, `--norm`, `--no_dropout` to match the generator architecture of the trained model. See this [FAQ](https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/docs/qa.md#runtimeerror-errors-in-loading-state_dict-812-671461-296) for more details.
+
+### Apply a pre-trained model (pix2pix)
+Download a pre-trained model with `./scripts/download_pix2pix_model.sh`.
+
+- Check [here](https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/scripts/download_pix2pix_model.sh#L3) for all the available pix2pix models. For example, if you would like to download label2photo model on the Facades dataset,
+```bash
+bash ./scripts/download_pix2pix_model.sh facades_label2photo
+```
+- Download the pix2pix facades datasets:
+```bash
+bash ./datasets/download_pix2pix_dataset.sh facades
+```
+- Then generate the results using
+```bash
+python test.py --dataroot ./datasets/facades/ --direction BtoA --model pix2pix --name facades_label2photo_pretrained
+```
+- Note that we specified `--direction BtoA` as Facades dataset's A to B direction is photos to labels.
+
+- If you would like to apply a pre-trained model to a collection of input images (rather than image pairs), please use `--model test` option. See `./scripts/test_single.sh` for how to apply a model to Facade label maps (stored in the directory `facades/testB`).
+
+- See a list of currently available models at `./scripts/download_pix2pix_model.sh`
+
+## [Docker](docs/docker.md)
+We provide the pre-built Docker image and Dockerfile that can run this code repo. See [docker](docs/docker.md).
+
+## [Datasets](docs/datasets.md)
+Download pix2pix/CycleGAN datasets and create your own datasets.
+
+## [Training/Test Tips](docs/tips.md)
+Best practice for training and testing your models.
+
+## [Frequently Asked Questions](docs/qa.md)
+Before you post a new question, please first look at the above Q & A and existing GitHub issues.
+
+## Custom Model and Dataset
+If you plan to implement custom models and dataset for your new applications, we provide a dataset [template](data/template_dataset.py) and a model [template](models/template_model.py) as a starting point.
+
+## [Code structure](docs/overview.md)
+To help users better understand and use our code, we briefly overview the functionality and implementation of each package and each module.
+
+## Pull Request
+You are always welcome to contribute to this repository by sending a [pull request](https://help.github.com/articles/about-pull-requests/).
+Please run `flake8 --ignore E501 .` and `python ./scripts/test_before_push.py` before you commit the code. Please also update the code structure [overview](docs/overview.md) accordingly if you add or remove files.
 
 ## Citation
+If you use this code for your research, please cite our papers.
 ```
-@inproceedings{
-    korotin2023kernel,
-    title={Kernel Neural Optimal Transport},
-    author={Korotin, Alexander and Selikhanovych, Daniil and Burnaev, Evgeny},
-    booktitle={International Conference on Learning Representations},
-    year={2023},
-    url={https://openreview.net/forum?id=Zuc_MHtUma4}
+@inproceedings{CycleGAN2017,
+  title={Unpaired Image-to-Image Translation using Cycle-Consistent Adversarial Networks},
+  author={Zhu, Jun-Yan and Park, Taesung and Isola, Phillip and Efros, Alexei A},
+  booktitle={Computer Vision (ICCV), 2017 IEEE International Conference on},
+  year={2017}
+}
+
+
+@inproceedings{isola2017image,
+  title={Image-to-Image Translation with Conditional Adversarial Networks},
+  author={Isola, Phillip and Zhu, Jun-Yan and Zhou, Tinghui and Efros, Alexei A},
+  booktitle={Computer Vision and Pattern Recognition (CVPR), 2017 IEEE Conference on},
+  year={2017}
 }
 ```
 
-## Application to Unpaired Image-to-Image Translation Task
-The unpaired domain translation task can be posed as an OT problem. Our NOT algorithm with kernel costs is applicable here. It searches for a transport map with the minimal transport cost (we use kernel $\ell^{2}$). It naturally aims to preserve certain image attributes during the translation.
-<p align="center"><img src="pics/ust_v2.png" width="550" /></p>
+## Other Languages
+[Spanish](docs/README_es.md)
 
-Compared to the popular image-to-image translation models based on GANs or diffusion models, our method provides the following key advantages
-- **[controlable](https://github.com/iamalexkorotin/KernelNeuralOptimalTransport#controlling-the-amount-of-diversity) amount of diversity** in generated samples (**without** any duct tape or heuristics); 
-- **better interpretability** of the learned map.
+## Related Projects
+**[contrastive-unpaired-translation](https://github.com/taesungp/contrastive-unpaired-translation) (CUT)**<br>
+**[CycleGAN-Torch](https://github.com/junyanz/CycleGAN) |
+[pix2pix-Torch](https://github.com/phillipi/pix2pix) | [pix2pixHD](https://github.com/NVIDIA/pix2pixHD)|
+[BicycleGAN](https://github.com/junyanz/BicycleGAN) | [vid2vid](https://tcwang0509.github.io/vid2vid/) | [SPADE/GauGAN](https://github.com/NVlabs/SPADE)**<br>
+**[iGAN](https://github.com/junyanz/iGAN) | [GAN Dissection](https://github.com/CSAILVision/GANDissect) | [GAN Paint](http://ganpaint.io/)**
 
-Qualitative examples are shown below for various pairs of datasets (at resolutions $128\times 128$).
+## Cat Paper Collection
+If you love cats, and love reading cool graphics, vision, and learning papers, please check out the Cat Paper [Collection](https://github.com/junyanz/CatPapers).
 
-### One-to-many translation (weak kernel cost)
-We show unpaired translition with NOT with the $\gamma$-weak kernel cost on *celeba (female) → anime*, *outdoor → church*, *handbags → shoes*, *texture → shoes*, *texture → handbags*, *handbags → shoes*, *shoes → handbags*  datasets.
-<p align="center"><img src="pics/translation_one_to_many.png" width="750" /></p>
-
-### Controlling the amount of diversity
-Our method offers a single parameter $\gamma\in[0,+\infty)$ in the weak kernel cost to control the amount of diversity.
-<p align="center"><img src="pics/diversity.png" width="750" /></p>
-
-## Repository structure
-The implementation is GPU-based with the multi-GPU support. Tested with `torch== 1.9.0` and 1-4 Tesla V100.
-
-All the experiments are issued in the form of pretty self-explanatory jupyter notebooks (`notebooks/`). For convenience, the majority of the evaluation output is preserved. Auxilary source code is moved to `.py` modules (`src/`). 
-- ```notebooks/KNOT_toy_1D.ipynb``` - toy experiments in 1D (weak kernel costs);
-- ```notebooks/KNOT_toy_2D.ipynb``` - toy experiments in 2D (weak kernel costs);
-- ```notebooks/KNOT_training_weak.ipynb``` - unpaired image-to-image translation (**one-to-many**, weak kernel costs);
-- ```notebooks/KNOT_plots.ipynb``` - plotting the translation results ([pre-trained models](https://disk.yandex.ru/d/PxaapIEnRPu7cA) are needed);
-- ```stats/compute_stats.ipynb``` - pre-compute [InceptionV3](https://en.wikipedia.org/wiki/Inceptionv3) statistics to speed up test [FID](https://arxiv.org/abs/1706.08500) computation;
-
-## Datasets
-- [Aligned anime faces](https://www.kaggle.com/datasets/reitanaka/alignedanimefaces) (105GB) should be pre-processed with ```datasets/preprocess.ipynb```;
-- [CelebA faces](https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html) requires ```datasets/list_attr_celeba.ipynb```;
-- Handbags, shoes, churches, outdoor [datasets](https://github.com/junyanz/iGAN/blob/master/train_dcgan/README.md);
-- [Describable Textures Dataset](https://www.robots.ox.ac.uk/~vgg/data/dtd/) (DTD).
-
-The dataloaders can be created by ```load_dataset``` function from ```src/tools.py```. The latter four datasets get loaded directly to RAM.
-
-## Credits
-- [Weights & Biases](https://wandb.ai) developer tools for machine learning;
-- [pytorch-fid repo](https://github.com/mseitzer/pytorch-fid) to compute [FID](https://arxiv.org/abs/1706.08500) score;
-- [UNet architecture](https://github.com/milesial/Pytorch-UNet) for transporter network;
-- [ResNet architectures](https://github.com/harryliew/WGAN-QC) for generator and discriminator;
-- [Inkscape](https://inkscape.org/) for the awesome editor for vector graphics;
-- [AugCycleGAN](https://github.com/aalmah/augmented_cyclegan) repository for CondInstanceNorm layer.
+## Acknowledgments
+Our code is inspired by [pytorch-DCGAN](https://github.com/pytorch/examples/tree/master/dcgan).
