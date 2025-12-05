@@ -8,12 +8,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from tqdm import tqdm_notebook
+from tqdm import tqdm
+
+# from tqdm import tqdm_notebook
 import multiprocessing
 
 from PIL import Image
 from .inception import InceptionV3
-from tqdm import tqdm_notebook as tqdm
+# from tqdm import tqdm_notebook as tqdm
 from .fid_score import calculate_frechet_distance
 from .distributions import LoaderSampler
 import torchvision.datasets as datasets
@@ -29,7 +31,7 @@ from torchvision.datasets import ImageFolder
 def load_dataset(name, path, img_size=64, batch_size=64, device='cuda'):
     if name in ['shoes', 'handbag', 'outdoor', 'church']:
         dataset = h5py_to_dataset(path, img_size)
-    elif name in ['celeba_female', 'aligned_anime_faces']:
+    elif name in ['celeba_female', 'celeba_male', 'aligned_anime_faces']:
         transform = Compose([Resize((img_size, img_size)), ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
         dataset = ImageFolder(path, transform=transform)
     elif name in ['dtd']:
@@ -41,11 +43,14 @@ def load_dataset(name, path, img_size=64, batch_size=64, device='cuda'):
         dataset = ImageFolder(path, transform=transform)
     else:
         raise Exception('Unknown dataset')
-        
-    if name in ['celeba_female']:
+    
+    if name in ['celeba_female', 'celeba_male']:
         with open('../datasets/list_attr_celeba.txt', 'r') as f:
             lines = f.readlines()[2:]
-        idx = [i for i in list(range(len(lines))) if lines[i].replace('  ', ' ').split(' ')[21] == '-1']
+        if name == 'celeba_female':
+            idx = [i for i in list(range(len(lines))) if lines[i].replace('  ', ' ').split(' ')[21] == '-1']
+        else:
+            idx = [i for i in list(range(len(lines))) if lines[i].replace('  ', ' ').split(' ')[21] != '-1']
     else:
         idx = list(range(len(dataset)))
     
@@ -148,6 +153,7 @@ def get_loader_stats(loader, batch_size=8, n_epochs=1, verbose=False, use_Y=Fals
                     pred_arr.append(model(batch)[0].cpu().data.numpy().reshape(end-start, -1))
 
     pred_arr = np.vstack(pred_arr)
+    print(f"pred_arr = {pred_arr.shape}")
     mu, sigma = np.mean(pred_arr, axis=0), np.cov(pred_arr, rowvar=False)
     gc.collect(); torch.cuda.empty_cache()
     return mu, sigma
@@ -175,6 +181,67 @@ def get_Z_pushed_loader_stats(T, loader, ZC=1, Z_STD=0.1, batch_size=8, n_epochs
                         XZ[1][start:end].type(torch.FloatTensor).to(device)
                     ).add(1).mul(.5)
                     pred_arr.append(model(batch)[0].cpu().data.numpy().reshape(end-start, -1))
+
+    pred_arr = np.vstack(pred_arr)
+    mu, sigma = np.mean(pred_arr, axis=0), np.cov(pred_arr, rowvar=False)
+    gc.collect(); torch.cuda.empty_cache()
+    return mu, sigma
+
+def get_pushed_loader_stats(T, loader, batch_size=8, n_epochs=1, verbose=False,
+                              device='cuda',
+                              use_downloaded_weights=False):
+    dims = 2048
+    block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
+    model = InceptionV3([block_idx], use_downloaded_weights=use_downloaded_weights).to(device)
+    freeze(model); freeze(T)
+    
+    size = len(loader.dataset)
+    pred_arr = []
+    
+    for epoch in range(n_epochs):
+        with torch.no_grad():
+            for step, (X, _) in enumerate(loader) if not verbose else tqdm(enumerate(loader)):
+                for i in range(0, len(X), batch_size):
+                    start, end = i, min(i + batch_size, len(X))
+                    batch = T(
+                        X[start:end].type(torch.FloatTensor).to(device),
+                    ).add(1).mul(.5)
+                    pred_arr.append(model(batch)[0].cpu().data.numpy().reshape(end-start, -1))
+
+    pred_arr = np.vstack(pred_arr)
+    mu, sigma = np.mean(pred_arr, axis=0), np.cov(pred_arr, rowvar=False)
+    gc.collect(); torch.cuda.empty_cache()
+    return mu, sigma
+
+def get_Z_pushed_loader_stats_resize(T, loader, ZC=1, Z_STD=0.1, batch_size=8, n_epochs=1, verbose=False,
+                              device='cuda',
+                              use_downloaded_weights=False,
+                              resize_shape=64):
+    dims = 2048
+    block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
+    model = InceptionV3([block_idx], use_downloaded_weights=use_downloaded_weights).to(device)
+    freeze(model); freeze(T)
+    
+    size = len(loader.dataset)
+    pred_arr = []
+    
+    for epoch in range(n_epochs):
+        with torch.no_grad():
+            for step, (X, _) in tqdm(enumerate(loader)) if not verbose else tqdm(enumerate(loader)):
+                Z = torch.randn(len(X), ZC, 1, 1) * Z_STD
+                XZ = (X, Z)
+                for i in range(0, len(X), batch_size):
+                    start, end = i, min(i + batch_size, len(X))
+                    batch = T(
+                        XZ[0][start:end].type(torch.FloatTensor).to(device),
+                        XZ[1][start:end].type(torch.FloatTensor).to(device)
+                    ).add(1).mul(.5)
+                    # print(f"batch size = {batch.shape}")
+                    # batch_resize = F.interpolate(batch, size=(resize_shape, resize_shape), mode='bilinear', align_corners=False)
+                    
+                    batch_resize = F.interpolate(batch, size=(resize_shape, resize_shape), mode='bilinear')
+                    # print(f"batch_resize = {batch_resize.shape}")
+                    pred_arr.append(model(batch_resize)[0].cpu().data.numpy().reshape(end-start, -1))
 
     pred_arr = np.vstack(pred_arr)
     mu, sigma = np.mean(pred_arr, axis=0), np.cov(pred_arr, rowvar=False)
