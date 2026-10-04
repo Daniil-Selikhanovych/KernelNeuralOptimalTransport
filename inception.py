@@ -11,7 +11,7 @@ except ImportError:
 # Inception weights ported to Pytorch from
 # http://download.tensorflow.org/models/image/imagenet/inception-2015-12-05.tgz
 FID_WEIGHTS_URL = 'https://github.com/mseitzer/pytorch-fid/releases/download/fid_weights/pt_inception-2015-12-05-6726825d.pth'
-FID_WEIGHTS_PATH = './Eval/imagenet/pt_inception-2015-12-05-6726825d.pth' # Specify path here if already downloaded.
+FID_WEIGHTS_PATH = "../../fid_model/pt_inception-2015-12-05-6726825d.pth"
 
 class InceptionV3(nn.Module):
     """Pretrained InceptionV3 network returning feature maps"""
@@ -33,8 +33,10 @@ class InceptionV3(nn.Module):
                  resize_input=True,
                  normalize_input=True,
                  requires_grad=False,
-                 use_fid_inception=True):
+                 use_fid_inception=True,
+                 use_downloaded_weights=False):
         """Build pretrained InceptionV3
+
         Parameters
         ----------
         output_blocks : list of int
@@ -76,7 +78,7 @@ class InceptionV3(nn.Module):
         self.blocks = nn.ModuleList()
 
         if use_fid_inception:
-            inception = fid_inception_v3()
+            inception = fid_inception_v3(use_downloaded_weights=use_downloaded_weights)
         else:
             inception = _inception_v3(pretrained=True)
 
@@ -127,11 +129,13 @@ class InceptionV3(nn.Module):
 
     def forward(self, inp):
         """Get Inception feature maps
+
         Parameters
         ----------
         inp : torch.autograd.Variable
             Input tensor of shape Bx3xHxW. Values are expected to be in
             range (0, 1)
+
         Returns
         -------
         List of torch.autograd.Variable, corresponding to the selected output
@@ -162,6 +166,7 @@ class InceptionV3(nn.Module):
 
 def _inception_v3(*args, **kwargs):
     """Wraps `torchvision.models.inception_v3`
+
     Skips default weight inititialization if supported by torchvision version.
     See https://github.com/mseitzer/pytorch-fid/issues/28.
     """
@@ -177,10 +182,12 @@ def _inception_v3(*args, **kwargs):
     return torchvision.models.inception_v3(*args, **kwargs)
 
 
-def fid_inception_v3():
+def fid_inception_v3(use_downloaded_weights=False):
     """Build pretrained Inception model for FID computation
+
     The Inception model for FID computation uses a different set of weights
     and has a slightly different structure than torchvision's Inception.
+
     This method first constructs torchvision's Inception and then patches the
     necessary parts that are different in the FID Inception model.
     """
@@ -197,11 +204,11 @@ def fid_inception_v3():
     inception.Mixed_7b = FIDInceptionE_1(1280)
     inception.Mixed_7c = FIDInceptionE_2(2048)
 
-    ##
-    #litu
-    # state_dict = load_state_dict_from_url(FID_WEIGHTS_URL, progress=True)
-    ##
-    state_dict = torch.load(FID_WEIGHTS_PATH)
+    if use_downloaded_weights:
+        # state_dict = torch.load(FID_WEIGHTS_PATH, map_location=None)
+        state_dict = load_state_dict_from_url(FID_WEIGHTS_URL, progress=True)
+    else:
+        state_dict = load_state_dict_from_url(FID_WEIGHTS_URL, progress=True)
     inception.load_state_dict(state_dict)
     return inception
 

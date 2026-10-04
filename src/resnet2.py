@@ -2,14 +2,85 @@ import numpy as np
 import torch
 from torch import nn
 
-class ResNet_D(nn.Module):
-    "Discriminator ResNet architecture from https://github.com/harryliew/WGAN-QC"
-    def __init__(self, size=64, nc=3, nfilter=64, nfilter_max=512, res_ratio=0.1):
+def weights_init_G(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='leaky_relu')
+    elif classname.find('BatchNorm') != -1:
+        nn.init.constant_(m.weight, 1)
+        nn.init.constant_(m.bias, 0)
+
+def weights_init_D(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='leaky_relu')
+    elif classname.find('BatchNorm') != -1:
+        nn.init.constant_(m.weight, 1)
+        nn.init.constant_(m.bias, 0)
+
+class ResNet_G(nn.Module):
+    "Generator ResNet architecture from https://github.com/harryliew/WGAN-QC"
+    def __init__(self, z_dim, size, nfilter=64, nfilter_max=512, bn=True, res_ratio=0.1, **kwargs):
         super().__init__()
         s0 = self.s0 = 4
         nf = self.nf = nfilter
         nf_max = self.nf_max = nfilter_max
-        self.nc = nc
+        self.bn = bn
+        self.z_dim = z_dim
+
+        # Submodules
+        nlayers = int(np.log2(size / s0))
+        self.nf0 = min(nf_max, nf * 2**(nlayers+1))
+
+        self.fc = nn.Linear(z_dim, self.nf0*s0*s0)
+        if self.bn:
+            self.bn1d = nn.BatchNorm1d(self.nf0*s0*s0)
+        self.relu = nn.LeakyReLU(0.2, inplace=True)
+
+        blocks = []
+        for i in range(nlayers, 0, -1):
+            nf0 = min(nf * 2**(i+1), nf_max)
+            nf1 = min(nf * 2**i, nf_max)
+            blocks += [
+                ResNetBlock(nf0, nf1, bn=self.bn, res_ratio=res_ratio),
+                ResNetBlock(nf1, nf1, bn=self.bn, res_ratio=res_ratio),
+                nn.Upsample(scale_factor=2)
+            ]
+
+        nf0 = min(nf * 2, nf_max)
+        nf1 = min(nf, nf_max)
+        blocks += [
+            ResNetBlock(nf0, nf1, bn=self.bn, res_ratio=res_ratio),
+            ResNetBlock(nf1, nf1, bn=self.bn, res_ratio=res_ratio)
+        ]
+
+        self.resnet = nn.Sequential(*blocks)
+        self.conv_img = nn.Conv2d(nf, 3, 3, padding=1)
+
+    def forward(self, z):
+        batch_size = z.size(0)
+        z = z.view(batch_size, -1)
+        out = self.fc(z)
+        if self.bn:
+            out = self.bn1d(out)
+        out = self.relu(out)
+        out = out.view(batch_size, self.nf0, self.s0, self.s0)
+
+        out = self.resnet(out)
+
+        out = self.conv_img(out)
+        out = torch.tanh(out)
+
+        return out
+
+
+class ResNet_D(nn.Module):
+    "Discriminator ResNet architecture from https://github.com/harryliew/WGAN-QC"
+    def __init__(self, size=64, nfilter=64, nfilter_max=512, res_ratio=0.1):
+        super().__init__()
+        s0 = self.s0 = 4
+        nf = self.nf = nfilter
+        nf_max = self.nf_max = nfilter_max
 
         # Submodules
         nlayers = int(np.log2(size / s0))
@@ -31,7 +102,7 @@ class ResNet_D(nn.Module):
                 ResNetBlock(nf0, nf1, bn=False, res_ratio=res_ratio),
             ]
 
-        self.conv_img = nn.Conv2d(nc, 1*nf, 3, padding=1)
+        self.conv_img = nn.Conv2d(3, 1*nf, 3, padding=1)
         self.relu = nn.LeakyReLU(0.2, inplace=True)
         self.resnet = nn.Sequential(*blocks)
         self.fc = nn.Linear(self.nf0*s0*s0, 1)
@@ -95,4 +166,102 @@ class ResNetBlock(nn.Module):
         else:
             x_s = x
         return x_s
-   
+
+
+## lr
+# conditional image generation
+class ResNet_CG(nn.Module):
+    "Generator ResNet architecture from https://github.com/harryliew/WGAN-QC"
+    def __init__(self, size, scale_factor=4, nfilter=64, nfilter_max=512, bn=True, res_ratio=0.1, **kwargs):
+        super().__init__()
+        s0 = self.s0 = size//scale_factor
+        nf = self.nf = nfilter
+        nf_max = self.nf_max = nfilter_max
+        self.bn = bn
+
+        # Submodules
+        nlayers = int(np.log2(size / s0))
+
+        self.nf0 = min(nf_max, nf * 2**(nlayers+1))
+        self.trans = nn.Conv2d(3, self.nf0, 3, padding=1)
+
+        blocks = []
+        for i in range(nlayers, 0, -1):
+            nf0 = min(nf * 2**(i+1), nf_max)
+            nf1 = min(nf * 2**i, nf_max)
+            blocks += [
+                ResNetBlock(nf0, nf1, bn=self.bn, res_ratio=res_ratio),
+                ResNetBlock(nf1, nf1, bn=self.bn, res_ratio=res_ratio),
+                nn.Upsample(scale_factor=2)
+            ]
+
+        nf0 = min(nf * 2, nf_max)
+        nf1 = min(nf, nf_max)
+        blocks += [
+            ResNetBlock(nf0, nf1, bn=self.bn, res_ratio=res_ratio),
+            ResNetBlock(nf1, nf1, bn=self.bn, res_ratio=res_ratio)
+        ]
+
+        self.resnet = nn.Sequential(*blocks)
+        self.conv_img = nn.Conv2d(nf, 3, 3, padding=1)
+
+    def forward(self, z):
+        out = self.trans(z)
+        out = self.resnet(out)
+        out = self.conv_img(out)
+        out = torch.tanh(out)
+        return out
+
+class BigResNet_CG(nn.Module):
+    "Generator ResNet architecture from https://github.com/harryliew/WGAN-QC"
+    def __init__(self, size, scale_factor=4, nfilter=64, nfilter_max=512, bn=True, res_ratio=0.1, **kwargs):
+        super().__init__()
+        s0 = self.s0 = size//scale_factor
+        nf = self.nf = nfilter
+        nf_max = self.nf_max = nfilter_max
+        self.bn = bn
+
+        # Submodules
+        nlayers = int(np.log2(size / s0))
+
+        self.nf0 = min(nf_max, nf * 2**(nlayers+1))
+        self.trans = nn.Conv2d(3, self.nf0, 3, padding=1)
+
+        blocks = []
+        for i in range(nlayers, 0, -1):
+            nf0 = min(nf * 2**(i+1), nf_max)
+            nf1 = min(nf * 2**i, nf_max)
+            blocks += [
+                ResNetBlock(nf0, nf1, bn=self.bn, res_ratio=res_ratio),
+                ResNetBlock(nf1, nf1, bn=self.bn, res_ratio=res_ratio),
+                ResNetBlock(nf1, nf1, bn=self.bn, res_ratio=res_ratio),
+                ResNetBlock(nf1, nf1, bn=self.bn, res_ratio=res_ratio),
+                nn.Upsample(scale_factor=2)
+            ]
+
+        nf0 = min(nf * 2, nf_max)
+        nf1 = min(nf, nf_max)
+        blocks += [
+            ResNetBlock(nf0, nf1, bn=self.bn, res_ratio=res_ratio),
+            ResNetBlock(nf1, nf1, bn=self.bn, res_ratio=res_ratio),
+            ResNetBlock(nf1, nf1, bn=self.bn, res_ratio=res_ratio),
+            ResNetBlock(nf1, nf1, bn=self.bn, res_ratio=res_ratio)
+        ]
+
+        self.resnet = nn.Sequential(*blocks)
+        self.conv_img = nn.Sequential(
+            ResNetBlock(nf1, nf1, bn=self.bn, res_ratio=res_ratio),
+            ResNetBlock(nf1, nf1, bn=self.bn, res_ratio=res_ratio),
+            nn.Conv2d(nf1, 3, 3, padding=1),
+            )
+
+    def forward(self, z):
+        out = self.trans(z)
+        out = self.resnet(out)
+        out = self.conv_img(out)
+        out = torch.tanh(out)
+        return out
+
+
+
+## 

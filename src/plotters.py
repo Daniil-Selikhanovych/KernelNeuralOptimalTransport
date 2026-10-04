@@ -1,149 +1,211 @@
+import numpy as np
 import matplotlib
 import numpy as np
 import matplotlib.pyplot as plt
-from .tools import ewma, freeze
 
 import torch
-import gc
+import torch.autograd as autograd
 
-def plot_Z_images(XZ, Y, T):
-    freeze(T);
-    with torch.no_grad():
-        T_XZ = T(
-            *(XZ[0].flatten(start_dim=0, end_dim=1), XZ[1].flatten(start_dim=0, end_dim=1))
-        ).permute(1,2,3,0).reshape(Y.shape[1], Y.shape[2], Y.shape[3], 10, 4).permute(4,3,0,1,2).flatten(start_dim=0, end_dim=1)
-        imgs = torch.cat([XZ[0][:,0], T_XZ, Y]).to('cpu').permute(0,2,3,1).mul(0.5).add(0.5).numpy().clip(0,1)
 
-    fig, axes = plt.subplots(6, 10, figsize=(15, 9), dpi=150)
+def plot_rgb_cloud(cloud, ax):
+    colors = np.clip(cloud, 0, 1)
+    ax.scatter(cloud[:, 0], cloud[:, 1], cloud[:, 2], c=colors)
+    ax.set_xlabel('Red'); ax.set_ylabel('Green'); ax.set_zlabel('Blue');
+
+def plot_combined_generated(Dec, Z, X, D, inv_transform=None, show=True):
+    Dec.train(False)
+    
+    if inv_transform is None:
+        inv_transform = lambda x: x
+    
+    fig, axes = plt.subplots(3, len(Z), figsize=(2 * len(Z), 6))
+    
+    Dec_Z = inv_transform(Dec(Z).permute(0, 2, 3, 1).cpu().detach().numpy()).clip(0,1)
+    axes.flatten()[0].set_ylabel('$Dec(x)$', fontsize=25)
+    for i in range(len(Z)):
+        axes.flatten()[i].imshow(Dec_Z[i], cmap='gray')
+    
+    D.train(False)
+    D_Z = D(Z.requires_grad_(True))
+    D.train(True)
+
+    Dec_D_Z = inv_transform(D_Z.permute(0, 2, 3, 1).cpu().detach().numpy()).clip(0,1)
+    axes[1, 0].set_ylabel(r'$\hat{G}(x)$', fontsize=25)
+    for i in range(len(Z)):
+        axes[1, i].imshow(Dec_D_Z[i], cmap='gray')
+    
+    Real_X = inv_transform(X.permute(0, 2, 3, 1).cpu().detach().numpy()).clip(0,1)
+    axes[2, 0].set_ylabel(r'$Y\sim \nu$', fontsize=25)
+    for i in range(len(Z)):
+        axes[2, i].imshow(Real_X[i], cmap='gray')
+     
+    fig.tight_layout(h_pad=0.01, w_pad=0.01)
+
+    if show:
+        plt.show()
+        
+    return fig, axes
+
+def plot_latent_pca(Z, E, D, pca, n_pairs=3, show=True):
+    assert n_pairs > 1
+    D.train(False);
+    pca_Z = pca.transform(Z.cpu().detach().numpy().reshape(len(Z), -1))
+    pca_E = pca.transform(E.cpu().detach().numpy().reshape(len(E), -1))
+    D_Z = D(Z).cpu().detach().numpy().reshape(len(Z), -1)
+    pca_D_Z = pca.transform(D_Z)
+    
+    fig, axes = plt.subplots(n_pairs, 3, figsize=(12, 4 * n_pairs), sharex=True, sharey=True)
+    
+    for n in range(n_pairs):
+        axes[n, 0].set_ylabel(f'Component {2*n+1}')
+        axes[n, 0].set_xlabel(f'Component {2*n}')
+        axes[n, 0].set_title(f'Initial Z', fontsize=25)
+        axes[n, 1].set_title('Transported Z', fontsize=25)
+        axes[n, 2].set_title('Latent Space', fontsize=25)
+
+        axes[n, 0].scatter(pca_Z[:, 2*n], pca_Z[:, 2*n+1], color='b', alpha=0.5)
+        axes[n, 1].scatter(pca_D_Z[:, 2*n], pca_D_Z[:, 2*n+1], color='r', alpha=0.5)
+        axes[n, 2].scatter(pca_E[:, 2*n], pca_E[:, 2*n+1], color='g', alpha=0.5)
+        
+    fig.tight_layout()
+    D.train(True)
+    
+    if show:
+        plt.show()
+    return fig, axes
+
+def plot_noise_interp_unequal(G, Q,  X, Y, inv_transform=None, show=True, n = 12, test=False):
+
+    if inv_transform is None:
+        inv_transform = lambda x: x
+    
+    if test:
+        fig, axes = plt.subplots(3, n, figsize=(6 * n, 6))
+    else:
+        fig, axes = plt.subplots(3, n, figsize=(2 * n, 6))
+    
+    Q_X = Q(X)
+    Q_X_interp = inv_transform(Q_X.permute(0, 2, 3, 1).cpu().detach().numpy()).clip(0,1)
+    
+    axes.flatten()[0].set_ylabel('$Q(X)$', fontsize=25)
+    for i in range(n):
+        axes.flatten()[i].imshow(Q_X_interp[i], cmap='gray')
+    
+    G.train(False)
+    G_X = G(X)
+    G.train(True)
+
+    G_X_push = inv_transform(G_X.permute(0, 2, 3, 1).cpu().detach().numpy()).clip(0,1)
+    axes[1, 0].set_ylabel(r'$\hat{G}(X)$', fontsize=25)
+    for i in range(n):
+        axes[1, i].imshow(G_X_push[i], cmap='gray')
+    
+    Real_Y = inv_transform(Y.permute(0, 2, 3, 1).cpu().detach().numpy()).clip(0,1)
+    axes[2, 0].set_ylabel(r'$Y \sim \nu$', fontsize=25)
+    for i in range(n):
+        axes[2, i].imshow(Real_Y[i], cmap='gray')
+     
     for i, ax in enumerate(axes.flatten()):
-        ax.imshow(imgs[i])
         ax.get_xaxis().set_visible(False)
         ax.set_yticks([])
         
-    axes[0, 0].set_ylabel('X', fontsize=24)
-    for i in range(4):
-        axes[i+1, 0].set_ylabel('T(X,Z)', fontsize=24)
-    axes[-1, 0].set_ylabel('Y', fontsize=24)
     
-    fig.tight_layout(pad=0.001)
-    torch.cuda.empty_cache(); gc.collect()
+    fig.tight_layout(h_pad=0.01, w_pad=0.01)
+
+    if show:
+        plt.show()
+        
     return fig, axes
 
-def plot_random_Z_images(X_sampler, ZC, Z_STD, Y_sampler, T):
-    X = X_sampler.sample(10)[:,None].repeat(1,4,1,1,1)
-    with torch.no_grad():
-        Z = torch.randn(10, 4, ZC, 1, 1, device='cuda') * Z_STD
-        XZ = (X, Z,)
-    Y = Y_sampler.sample(10)
-    return plot_Z_images(XZ, Y, T)
-
-def plot_bar_and_stochastic_2D(X_sampler, Y_sampler, T, ZD, Z_STD):
-    DIM = 2
-    freeze(T)
+def plot_inv_noise_interp_unequal(G, psi, Q,  X, Y, inv_transform=None, show=True, n = 12):
     
-    PLOT_X_SIZE_LEFT = 64
-    PLOT_Z_COMPUTE_LEFT = 256
+    if inv_transform is None:
+        inv_transform = lambda x: x
+    
+    fig, axes = plt.subplots(3, n, figsize=(2 * n, 6))
+        
+    Q_X = Q(X)
+    Q_X_interp = inv_transform(Q_X.permute(0, 2, 3, 1).cpu().detach().numpy()).clip(0,1)
+    axes.flatten()[0].set_ylabel('$Q(X)$', fontsize=25)
+    for i in range(n):
+        axes.flatten()[i].imshow(Q_X_interp[i], cmap='gray')
 
-    PLOT_X_SIZE_RIGHT = 32
-    PLOT_Z_SIZE_RIGHT = 4
 
-    assert PLOT_Z_COMPUTE_LEFT >= PLOT_Z_SIZE_RIGHT
-    assert PLOT_X_SIZE_LEFT >= PLOT_X_SIZE_RIGHT
+    ## Pushforward using conjugate transform
+    psi.train(False)
+    G.train(False)
 
-    X = X_sampler.sample(PLOT_X_SIZE_LEFT).reshape(-1, 1, DIM).repeat(1, PLOT_Z_COMPUTE_LEFT, 1)
-    Y = Y_sampler.sample(PLOT_X_SIZE_LEFT)
+    G_X = G(X)
+        
+    batch_size = Y.shape[0]
+    eta = torch.FloatTensor(batch_size,1,1,1).uniform_(0,1)
+    eta = torch.bernoulli(eta)
+    eta = eta.expand(batch_size, Y.size(1), Y.size(2), Y.size(3))
+    eta = eta.cuda()
 
-    with torch.no_grad():
-        Z = torch.randn(PLOT_X_SIZE_LEFT, PLOT_Z_COMPUTE_LEFT, ZD, device='cuda') * Z_STD
-        XZ = torch.cat([X, Z], dim=2)
-        T_XZ = T(
-            XZ.flatten(start_dim=0, end_dim=1)
-        ).permute(1, 0).reshape(DIM, -1, PLOT_Z_COMPUTE_LEFT).permute(1, 2, 0)
+    interpolated = eta * Y + (1 - eta) * G_X
 
-    X_np = X[:, 0].cpu().numpy()
-    XZ_np = T_XZ.cpu().numpy()
-    Y_np = Y.cpu().numpy()
-    T_XZ_np = T_XZ.cpu().numpy()
+    interpolated.requires_grad_(True)
+    psi_interpolated = psi(interpolated)
 
-    fig, axes = plt.subplots(1, 3, figsize=(9, 3), dpi=150, sharex=True, sharey=True, )
-    for i in range(2):
-        axes[i].set_xlim(-2.5, 2.5); axes[i].set_ylim(-2.5, 2.5)
-        axes[i].grid(True)
+    gradients = autograd.grad(
+        outputs=psi_interpolated, inputs=interpolated,
+        grad_outputs=torch.ones(psi_interpolated.size()).to(interpolated),
+        create_graph=True, retain_graph=True
+    )[0]
 
-#     axes[0].set_title(r'Map $x\mapsto \overline{T}(x)=\int_{\mathcal{Z}}T(x,z)d\mathbb{S}(z)$', fontsize=22, pad=10)
-#     axes[1].set_title(r'Stochastic map $x\mapsto T(x,z)$', fontsize=20, pad=10)
+    psi.train(True)
+    G.train(True)
 
-    from matplotlib import collections  as mc
-    lines = list(zip(X_np[:PLOT_X_SIZE_LEFT], T_XZ_np.mean(axis=1)[:PLOT_X_SIZE_LEFT]))
+    grad_psi_push = inv_transform(gradients.permute(0, 2, 3, 1).cpu().detach().numpy()).clip(0,1)
+    axes[1, 0].set_ylabel(r'$\nabla{\hat{\psi}}(Y)$', fontsize=25)
+    for i in range(n):
+        axes[1, i].imshow(grad_psi_push[i], cmap='gray')
 
-    lc = mc.LineCollection(lines, linewidths=1, color='black')
-    axes[0].add_collection(lc)
+    Real_Y = inv_transform(Y.permute(0, 2, 3, 1).cpu().detach().numpy()).clip(0,1)
+    axes[2, 0].set_ylabel(r'$Y \sim \nu$', fontsize=25)
+    for i in range(n):
+        axes[2, i].imshow(Real_Y[i], cmap='gray')
 
-    axes[0].scatter(
-        X_np[:PLOT_X_SIZE_LEFT, 0], X_np[:PLOT_X_SIZE_LEFT, 1], c='lightcoral', edgecolors='black',
-        zorder=2, label=r'$x\sim\mathbb{P}$'
-    )
-    axes[0].scatter(
-        T_XZ_np.mean(axis=1)[:PLOT_X_SIZE_LEFT, 0], T_XZ_np.mean(axis=1)[:PLOT_X_SIZE_LEFT, 1],
-        c='wheat', edgecolors='black', zorder=2, label=r'$\overline{T}(x)$', marker='v'
-    )
-    axes[0].legend(fontsize=12, loc='lower right', framealpha=1)
+    for i, ax in enumerate(axes.flatten()):
+        ax.get_xaxis().set_visible(False)
+        ax.set_yticks([])
 
-    lines = []
-    for i in range(PLOT_X_SIZE_RIGHT):
-        for j in range(PLOT_Z_SIZE_RIGHT):
-            lines.append((X_np[i], T_XZ_np[i, j]))
-    lc = mc.LineCollection(lines, linewidths=0.5, color='black')
-    axes[1].add_collection(lc)
-    axes[1].scatter(
-        X_np[:PLOT_X_SIZE_RIGHT, 0], X_np[:PLOT_X_SIZE_RIGHT, 1], c='lightcoral', edgecolors='black',
-        zorder=2,  label=r'$x\sim\mathbb{P}$'
-    )
-    axes[1].scatter(
-        T_XZ_np[:PLOT_X_SIZE_RIGHT, :PLOT_Z_SIZE_RIGHT, 0].flatten(),
-        T_XZ_np[:PLOT_X_SIZE_RIGHT, :PLOT_Z_SIZE_RIGHT, 1].flatten(),
-        c='darkseagreen', edgecolors='black', zorder=3,  label=r'$\widehat{T}(x,z)$'
-    )
-    axes[1].legend(fontsize=12, loc='lower right', framealpha=1)
 
+    fig.tight_layout(h_pad=0.01, w_pad=0.01)
+
+    if show:
+        plt.show()
+        
+    return fig, axes
+
+def plot_low_dim_equal(G, Q, X, Y, show=True):
+    
+    G.train(False)
+    G_X = G(X).cpu().detach().numpy()
+    G.train(True)
+    
+    X = X.cpu().numpy()
+    Y = Y.cpu().numpy()
+
+    
+    plt.rcParams.update({'font.size': 30})
+    fig, axes = plt.subplots(1,1,figsize=(10,10))
+
+    axes.plot(X[:,0], X[:,1],'og',label=r'$X \sim \mu$', color='forestgreen')
+    axes.plot(G_X[:,0],G_X[:,1],'d',label=r'$\hat{G}(X)$', color='blue')
+    axes.plot(Y[:,0], Y[:,1],'s', label=r'$Y \sim \nu$', color='peru')
+
+    for i in range(X.shape[0]):
+        plt.arrow(X[i,0], X[i,1], G_X[i,0] - X[i,0], G_X[i,1] - X[i,1],  alpha=0.2, head_width=0.03, head_length = 0.05, fc='y', ec = 'y', color='y')
+
+    axes.grid()
+
+    # plt.legend(loc='upper left')
+    
     fig.tight_layout()
+        
+    if show:
+        plt.show()
     
-    return fig, axes
-
-def plot_generated_2D(X_sampler, Y_sampler, T, ZD, Z_STD):
-    DIM = 2
-    freeze(T)
-
-    PLOT_SIZE = 512
-    X = X_sampler.sample(PLOT_SIZE).reshape(-1, 1, DIM).repeat(1, 1, 1)
-    Y = Y_sampler.sample(PLOT_SIZE)
-
-    with torch.no_grad():
-        Z = torch.randn(PLOT_SIZE, 1, ZD, device='cuda') * Z_STD
-        XZ = torch.cat([X, Z], dim=2)
-        T_XZ = T(
-            XZ.flatten(start_dim=0, end_dim=1)
-        ).permute(1, 0).reshape(DIM, -1, 1).permute(1, 2, 0)
-
-    fig, axes = plt.subplots(1, 3, figsize=(9, 3), sharex=True, sharey=True, dpi=150)
-
-    X_np = X[:,0].cpu().numpy()
-    Y_np = Y.cpu().numpy()
-    T_XZ_np = T_XZ[:,0].cpu().numpy()
-
-    for i in range(3):
-        axes[i].set_xlim(-2.5, 2.5); axes[i].set_ylim(-2.5, 2.5)
-        axes[i].grid(True)
-
-    axes[0].scatter(X_np[:, 0], X_np[:, 1], c='lightcoral', edgecolors='black', label=r'Input $x\sim\mathbb{P}$',zorder=2,)
-    axes[1].scatter(Y_np[:, 0], Y_np[:, 1], c='darkseagreen', edgecolors='black', label=r'Target $y\sim\mathbb{Q}$',zorder=2,)
-    axes[2].scatter(T_XZ_np[:, 0], T_XZ_np[:, 1], c='darkseagreen', edgecolors='black', label=r'Mapped $\widehat{T}(x,z)$',zorder=2,)
-    for i in range(3):
-        axes[i].legend(fontsize=12, loc='lower right', framealpha=1)
-    
-#     axes[0].set_title(r'Input $x\sim\mathbb{P}$', fontsize=22, pad=10)
-#     axes[1].set_title(r'Target $y\sim\mathbb{Q}$', fontsize=22, pad=10)
-#     axes[2].set_title(r'Fitted $T(x,z)_{\#}(\mathbb{P}\times\mathbb{S})$', fontsize=22, pad=10)
-
-    fig.tight_layout()
-    return fig, axes
+    return fig, axes  

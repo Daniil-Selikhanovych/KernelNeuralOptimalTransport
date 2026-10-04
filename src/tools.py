@@ -1,77 +1,213 @@
-import pandas as pd
+import os, sys
+import torchvision.datasets as datasets
 import numpy as np
+import pandas as pd
+from tqdm import tqdm
 
-import os
+import os, sys
+import argparse
+import collections
+from scipy.io import savemat
+from tqdm import trange
+from torchvision.utils import save_image
+from torch.utils.data import DataLoader
+
+import multiprocessing
 import itertools
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-from tqdm import tqdm
-
-# from tqdm import tqdm_notebook
-import multiprocessing
-
 from PIL import Image
+sys.path.append("..")
+
 from .inception import InceptionV3
-# from tqdm import tqdm_notebook as tqdm
-from .fid_score import calculate_frechet_distance
-from .distributions import LoaderSampler
-import torchvision.datasets as datasets
-import h5py
-from torch.utils.data import TensorDataset, ConcatDataset
+from .fid_score import get_activations_for_dataloader
 
 import gc
 
-from torch.utils.data import Subset, DataLoader, Dataset
-from torchvision.transforms import Compose, Resize, Normalize, ToTensor, RandomCrop, RandomHorizontalFlip, RandomVerticalFlip, Lambda, Pad, CenterCrop, RandomResizedCrop
-from torchvision.datasets import ImageFolder
+## LR
+import tensorflow as tf
+import io
+import matplotlib.pyplot as plt
+##
 
-def load_dataset(name, path, img_size=64, batch_size=64, device='cuda'):
-    if name in ['shoes', 'handbag', 'outdoor', 'church']:
-        dataset = h5py_to_dataset(path, img_size)
-    elif name in ['celeba_female', 'celeba_male', 'aligned_anime_faces']:
-        transform = Compose([Resize((img_size, img_size)), ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-        dataset = ImageFolder(path, transform=transform)
-    elif name in ['dtd']:
-        transform = Compose(
-            [Resize(300), RandomResizedCrop((img_size,img_size), scale=(128./300, 1.), ratio=(1., 1.)),
-             RandomHorizontalFlip(0.5), RandomVerticalFlip(0.5),
-             ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
-        )
-        dataset = ImageFolder(path, transform=transform)
-    else:
-        raise Exception('Unknown dataset')
-    
-    if name in ['celeba_female', 'celeba_male']:
-        with open('../datasets/list_attr_celeba.txt', 'r') as f:
-            lines = f.readlines()[2:]
-        if name == 'celeba_female':
-            idx = [i for i in list(range(len(lines))) if lines[i].replace('  ', ' ').split(' ')[21] == '-1']
-        else:
-            idx = [i for i in list(range(len(lines))) if lines[i].replace('  ', ' ').split(' ')[21] != '-1']
-    else:
-        idx = list(range(len(dataset)))
-    
-    test_ratio=0.1
-    test_size = int(len(idx) * test_ratio)
-    if name == 'dtd':
-        np.random.seed(0x000000); np.random.shuffle(idx)
-        train_idx, test_idx = idx[:-test_size], idx[-test_size:]
-    else:
-        train_idx, test_idx = idx[:-test_size], idx[-test_size:]
-    train_set, test_set = Subset(dataset, train_idx), Subset(dataset, test_idx)
-#     print(len(train_idx), len(test_idx))
-
-    train_sampler = LoaderSampler(DataLoader(train_set, shuffle=True, num_workers=8, batch_size=batch_size), device)
-    test_sampler = LoaderSampler(DataLoader(test_set, shuffle=True, num_workers=8, batch_size=batch_size), device)
-    return train_sampler, test_sampler
-import random
+def compute_l1_norm(model):
+    regularizer = 0.
+    for param in model.parameters():
+        regularizer += torch.sum(torch.abs(param))
+    return regularizer
 
 def ewma(x, span=200):
     return pd.DataFrame({'x': x}).ewm(span=span).mean().values[:, 0]
 
+def read_images_to_ram(path, mode='RGB', verbose=True):
+    images = []
+    fails = 0
+    print('Reading images from {}'.format(path))
+    for file in tqdm(os.listdir(path)) if verbose else os.listdir(path):
+        try:
+            with Image.open(os.path.join(path, file), 'r') as im:
+                images.append(im.convert(mode).copy())
+        except:
+            fails += 1
+            if verbose:
+                print('Failed to read {}'.format(os.path.join(path, file)))
+    print('{} succesful; {} fails'.format(len(images), fails)) if verbose else None
+    return images
+
+class ImageBatchSampler:
+    def __init__(self, list_of_images, transform=None):
+        self.list_of_images = list_of_images
+        self.transform = transform if transform is not None else lambda x: x
+
+    def sample(self, batch_size):
+        idx = np.random.choice(range(len(self.list_of_images)), replace=True, size=batch_size)
+        batch = [self.list_of_images[i] for i in idx]
+        return torch.stack(list(map(self.transform, batch)))
+
+# def read_images(paths, mode='RGB', verbose=True):
+#     images = []
+#     for path in paths:
+#         try:
+#             with Image.open(path, 'r') as im:
+#                 images.append(im.convert(mode).copy())
+#         except:
+#             if verbose:
+#                 print('Failed to read {}'.format(path))
+#     return images
+
+##
+#litu
+#
+def read_images(paths, mode='RGB', verbose=True):
+    images = []
+    crop_rectangle = (19, 39, 159, 179) # center crop with size 140, original image size: [178,218]
+    crop_size = 64
+    for path in paths:
+        try:
+            with Image.open(path, 'r') as im:
+                images.append(im.crop(crop_rectangle).resize((crop_size,crop_size)).convert(mode).copy())
+        except:
+            if verbose:
+                print('Failed to read {}'.format(path))
+    return images
+
+##
+
+
+class ImagesReader:
+    def __init__(self, mode='RGB', verbose=True):
+        self.mode = mode
+        self.verbose = verbose
+        
+    def __call__(self, paths):
+        return read_images(paths, mode=self.mode, verbose=self.verbose)
+    
+def read_image_folder(path, mode='RGB', verbose=True, n_jobs=1):
+    paths = [os.path.join(path, name) for name in os.listdir(path)]
+    
+    chunk_size = (len(paths) // n_jobs) + 1
+    chunks = [paths[x:x+chunk_size] for x in range(0, len(paths), chunk_size)]
+    
+    pool = multiprocessing.Pool(n_jobs)
+    
+    chunk_reader = ImagesReader(mode, verbose)
+    
+    images = list(itertools.chain.from_iterable(
+        pool.map(chunk_reader, chunks)
+    ))
+    pool.close()
+    return images
+
+def get_generated_inception_stats(G, Z_sampler, inv_transform, size, batch_size=16):
+    dims = 2048
+    block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
+    model = InceptionV3([block_idx]).cuda()
+    model.eval()
+
+    if batch_size > size:
+        print(('Warning: batch size is bigger than the data size. '
+               'Setting batch size to data size'))
+        batch_size = size
+
+    pred_arr = np.empty((size, dims))
+
+    for i in tqdm(range(0, size, batch_size)):
+        start = i
+        end = min(i + batch_size, size)
+        
+        G_Z = G(Z_sampler.sample(end-start).requires_grad_(True))
+        if inv_transform is not None:
+            G_Z = inv_transform(G_Z)
+        batch = G_Z.detach().type(torch.FloatTensor).cuda()
+        pred = model(batch)[0]
+
+        pred_arr[start:end] = pred.cpu().data.numpy().reshape(pred.size(0), -1)
+
+    mu = np.mean(pred_arr, axis=0)
+    sigma = np.cov(pred_arr, rowvar=False)
+    
+    model = model.cpu()
+    del model, pred_arr, pred, batch
+    gc.collect()
+    torch.cuda.empty_cache()
+    
+    return mu, sigma
+
+def get_statistics_of_dataloader(dataloader, dims=2048, cuda=False, verbose=False):
+    block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
+
+    model = InceptionV3([block_idx])
+    if cuda:
+        model.cuda()
+        
+    act = get_activations_for_dataloader(dataloader, model, dims, cuda, verbose)
+    mu = np.mean(act, axis=0)
+    sigma = np.cov(act, rowvar=False)
+    return mu, sigma
+
+def energy_based_distance(X, Y, n_projections=10000, biased=False):
+    '''
+    An implementation of unbiased energy-based distance between
+    two disributions given by i.i.d. batches.
+    
+    This implementation computes an unbiased sliced continuous
+    ranking probability score (via random projections).
+    It equals energy based distance up to a multiplicative
+    constant depending on the dimension,
+    see Theorem 4.1 of https://arxiv.org/pdf/1912.07048.pdf for details 
+    '''
+    assert X.size(1) == Y.size(1)
+    
+    thetas = torch.randn(n_projections, X.size(1)).cuda()
+    thetas = thetas / thetas.norm(2, dim=1, keepdim=True)
+    
+    # Sorted projection of joint matrix and reverse sorted index
+    pXY, idx = torch.sort(thetas @ torch.cat((X, Y), dim=0).transpose(0,1), dim=1)
+    
+    # Normalized indicator functions (1./X.size(0) for elements from X, -1./Y.size(0) for Y)
+    I = torch.ones(idx.size(), dtype=torch.float32, device='cuda') / X.size(0)
+    I[idx >= X.size(0)] = -1. / Y.size(0)
+    
+    SFXY = torch.cumsum(I, dim=1)
+    scrps_biased = torch.mean(torch.sum((pXY[:, 1:] - pXY[:, :-1]) * SFXY[:, :-1] ** 2, dim=1))
+    
+    if biased:
+        return scrps_biased
+    
+    pX_mask = idx < X.size(0)
+    SFX = torch.cumsum(I[pX_mask].reshape(-1, X.size(0)), dim=1)
+    pX = pXY[pX_mask].reshape(-1, X.size(0))
+    var_SFX = torch.mean(torch.sum((pX[:, 1:] - pX[:, :-1]) * SFX[:, :-1] * (1. - SFX[:, :-1]), dim=1)) / (X.size(0) - 1)
+    
+    pY_mask = idx >= X.size(0)
+    SFY = torch.cumsum(I[pY_mask].reshape(-1, Y.size(0)), dim=1)
+    pY = pXY[pY_mask].reshape(-1, Y.size(0))
+    var_SFY = torch.mean(torch.sum((pY[:, 1:] - pY[:, :-1]) * SFY[:, :-1] * (1. - SFY[:, :-1]), dim=1)) / (Y.size(0) - 1)
+    
+    return scrps_biased - var_SFX - var_SFY
+
+##
+# lr
 def freeze(model):
     for p in model.parameters():
         p.requires_grad_(False)
@@ -81,19 +217,6 @@ def unfreeze(model):
     for p in model.parameters():
         p.requires_grad_(True)
     model.train(True)
-    
-def weights_init_D(m):
-    classname = m.__class__.__name__
-    if classname.find('Conv') != -1:
-        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='leaky_relu')
-    elif classname.find('BatchNorm') != -1:
-        nn.init.constant_(m.weight, 1)
-        nn.init.constant_(m.bias, 0)
-        
-def weights_init_mlp(m):
-    classname = m.__class__.__name__
-    if classname.find('Linear') != -1:
-        nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
 
 def fig2data ( fig ):
     """
@@ -117,133 +240,5 @@ def fig2img ( fig ):
     buf = fig2data ( fig )
     w, h, d = buf.shape
     return Image.frombytes( "RGBA", ( w ,h ), buf.tostring( ) )
-
-def h5py_to_dataset(path, img_size=64):
-    with h5py.File(path, "r") as f:
-        # List all groups
-        print("Keys: %s" % f.keys())
-        a_group_key = list(f.keys())[0]
-
-        # Get the data
-        data = list(f[a_group_key])
-    with torch.no_grad():
-        dataset = 2 * (torch.tensor(np.array(data), dtype=torch.float32) / 255.).permute(0, 3, 1, 2) - 1
-        dataset = F.interpolate(dataset, img_size, mode='bilinear')    
-
-    return TensorDataset(dataset, torch.zeros(len(dataset)))
-
-def get_loader_stats(loader, batch_size=8, n_epochs=1, verbose=False, use_Y=False):
-    dims = 2048
-    block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
-    model = InceptionV3([block_idx]).cuda()
-    freeze(model)
     
-    size = len(loader.dataset)
-    pred_arr = []
-    
-    for epoch in range(n_epochs):
-        with torch.no_grad():
-            for step, (X, Y) in enumerate(loader) if not verbose else tqdm(enumerate(loader)):
-                for i in range(0, len(X), batch_size):
-                    start, end = i, min(i + batch_size, len(X))
-                    if not use_Y:
-                        batch = ((X[start:end] + 1) / 2).type(torch.FloatTensor).cuda()
-                    else:
-                        batch = ((Y[start:end] + 1) / 2).type(torch.FloatTensor).cuda()
-                    pred_arr.append(model(batch)[0].cpu().data.numpy().reshape(end-start, -1))
-
-    pred_arr = np.vstack(pred_arr)
-    print(f"pred_arr = {pred_arr.shape}")
-    mu, sigma = np.mean(pred_arr, axis=0), np.cov(pred_arr, rowvar=False)
-    gc.collect(); torch.cuda.empty_cache()
-    return mu, sigma
-
-def get_Z_pushed_loader_stats(T, loader, ZC=1, Z_STD=0.1, batch_size=8, n_epochs=1, verbose=False,
-                              device='cuda',
-                              use_downloaded_weights=False):
-    dims = 2048
-    block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
-    model = InceptionV3([block_idx], use_downloaded_weights=use_downloaded_weights).to(device)
-    freeze(model); freeze(T)
-    
-    size = len(loader.dataset)
-    pred_arr = []
-    
-    for epoch in range(n_epochs):
-        with torch.no_grad():
-            for step, (X, _) in enumerate(loader) if not verbose else tqdm(enumerate(loader)):
-                Z = torch.randn(len(X), ZC, 1, 1) * Z_STD
-                XZ = (X, Z)
-                for i in range(0, len(X), batch_size):
-                    start, end = i, min(i + batch_size, len(X))
-                    batch = T(
-                        XZ[0][start:end].type(torch.FloatTensor).to(device),
-                        XZ[1][start:end].type(torch.FloatTensor).to(device)
-                    ).add(1).mul(.5)
-                    pred_arr.append(model(batch)[0].cpu().data.numpy().reshape(end-start, -1))
-
-    pred_arr = np.vstack(pred_arr)
-    mu, sigma = np.mean(pred_arr, axis=0), np.cov(pred_arr, rowvar=False)
-    gc.collect(); torch.cuda.empty_cache()
-    return mu, sigma
-
-def get_pushed_loader_stats(T, loader, batch_size=8, n_epochs=1, verbose=False,
-                              device='cuda',
-                              use_downloaded_weights=False):
-    dims = 2048
-    block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
-    model = InceptionV3([block_idx], use_downloaded_weights=use_downloaded_weights).to(device)
-    freeze(model); freeze(T)
-    
-    size = len(loader.dataset)
-    pred_arr = []
-    
-    for epoch in range(n_epochs):
-        with torch.no_grad():
-            for step, (X, _) in enumerate(loader) if not verbose else tqdm(enumerate(loader)):
-                for i in range(0, len(X), batch_size):
-                    start, end = i, min(i + batch_size, len(X))
-                    batch = T(
-                        X[start:end].type(torch.FloatTensor).to(device),
-                    ).add(1).mul(.5)
-                    pred_arr.append(model(batch)[0].cpu().data.numpy().reshape(end-start, -1))
-
-    pred_arr = np.vstack(pred_arr)
-    mu, sigma = np.mean(pred_arr, axis=0), np.cov(pred_arr, rowvar=False)
-    gc.collect(); torch.cuda.empty_cache()
-    return mu, sigma
-
-def get_Z_pushed_loader_stats_resize(T, loader, ZC=1, Z_STD=0.1, batch_size=8, n_epochs=1, verbose=False,
-                              device='cuda',
-                              use_downloaded_weights=False,
-                              resize_shape=64):
-    dims = 2048
-    block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
-    model = InceptionV3([block_idx], use_downloaded_weights=use_downloaded_weights).to(device)
-    freeze(model); freeze(T)
-    
-    size = len(loader.dataset)
-    pred_arr = []
-    
-    for epoch in range(n_epochs):
-        with torch.no_grad():
-            for step, (X, _) in tqdm(enumerate(loader)) if not verbose else tqdm(enumerate(loader)):
-                Z = torch.randn(len(X), ZC, 1, 1) * Z_STD
-                XZ = (X, Z)
-                for i in range(0, len(X), batch_size):
-                    start, end = i, min(i + batch_size, len(X))
-                    batch = T(
-                        XZ[0][start:end].type(torch.FloatTensor).to(device),
-                        XZ[1][start:end].type(torch.FloatTensor).to(device)
-                    ).add(1).mul(.5)
-                    # print(f"batch size = {batch.shape}")
-                    # batch_resize = F.interpolate(batch, size=(resize_shape, resize_shape), mode='bilinear', align_corners=False)
-                    
-                    batch_resize = F.interpolate(batch, size=(resize_shape, resize_shape), mode='bilinear')
-                    # print(f"batch_resize = {batch_resize.shape}")
-                    pred_arr.append(model(batch_resize)[0].cpu().data.numpy().reshape(end-start, -1))
-
-    pred_arr = np.vstack(pred_arr)
-    mu, sigma = np.mean(pred_arr, axis=0), np.cov(pred_arr, rowvar=False)
-    gc.collect(); torch.cuda.empty_cache()
-    return mu, sigma
+#
