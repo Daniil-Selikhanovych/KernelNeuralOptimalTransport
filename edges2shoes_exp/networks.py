@@ -41,7 +41,7 @@ def define_G(input_nc, output_nc, ngf, norm='instance', which_model_netG='resnet
                            use_dropout=use_dropout, n_blocks=9, gpu_ids=gpu_ids)
 
     if len(gpu_ids) > 0:
-        netG.to(gpu_ids[0])
+        netG.to(f"cuda:{gpu_ids[0]}")
     netG.apply(weights_init)
     return netG
 
@@ -60,7 +60,8 @@ def define_stochastic_G(nlatent, input_nc, output_nc, ngf, norm='instance',
                               use_dropout=use_dropout, n_blocks=9, gpu_ids=gpu_ids)
 
     if len(gpu_ids) > 0:
-        netG.to(gpu_ids[0])
+        print(f"gpu_ids = {gpu_ids}")
+        netG.to(f"cuda:{gpu_ids[0]}")
     netG.apply(weights_init)
     return netG
 
@@ -75,7 +76,7 @@ def define_D_A(input_nc, ndf, which_model_netD, norm, use_sigmoid=False, gpu_ids
     netD = Discriminator_edges(input_nc, ndf, norm_layer=norm_layer, use_sigmoid=use_sigmoid, gpu_ids=gpu_ids)
 
     if use_gpu:
-        netD.to(gpu_ids[0])
+        netD.to(f"cuda:{gpu_ids[0]}")
     netD.apply(weights_init)
     return netD
 
@@ -90,7 +91,7 @@ def define_D_B(input_nc, ndf, which_model_netD, norm, use_sigmoid=False, gpu_ids
     netD = Discriminator(input_nc, ndf, norm_layer=norm_layer, use_sigmoid=use_sigmoid, gpu_ids=gpu_ids)
 
     if use_gpu:
-        netD.to(gpu_ids[0])
+        netD.to(f"cuda:{gpu_ids[0]}")
     netD.apply(weights_init)
     return netD
 
@@ -104,7 +105,7 @@ def define_LAT_D(nlatent, ndf, use_sigmoid=False, gpu_ids=[]):
     netD = DiscriminatorLatent(nlatent, ndf, use_sigmoid=use_sigmoid, gpu_ids=gpu_ids)
 
     if use_gpu:
-        netD.to(gpu_ids[0])
+        netD.to(f"cuda:{gpu_ids[0]}")
     netD.apply(weights_init)
     return netD
 
@@ -118,7 +119,7 @@ def define_E(nlatent, input_nc, nef, norm='batch', gpu_ids=[], image_size=64):
     netE = LatentEncoder(nlatent, input_nc, nef, norm_layer=norm_layer, gpu_ids=gpu_ids, image_size=image_size)
 
     if use_gpu:
-        netE.to(gpu_ids[0])
+        netE.to(f"cuda:{gpu_ids[0]}")
     netE.apply(weights_init)
     return netE
 
